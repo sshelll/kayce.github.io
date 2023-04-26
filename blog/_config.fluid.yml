@@ -771,7 +771,7 @@ gitalk:
   clientID: b25aa0a3d88c5fc4dbeb
   clientSecret: 7193fb8c2e2e1def40e36c8e071a994558aaf166
   repo: sshelll.github.io
-  owner: 'sshelll'
+  owner: sshelll
   admin: ['sshelll']
   language: zh-CN
   labels: ['Gitalk']

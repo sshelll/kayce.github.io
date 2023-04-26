@@ -2,7 +2,6 @@
 title: Career 2023
 date: 2023-04-26 23:00:53
 excerpt: 职业生涯的开始
-comment: 'valine'
 categories: career
 tags: 
   - 四川大学
