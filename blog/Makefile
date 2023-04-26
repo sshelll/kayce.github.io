@@ -1,12 +1,13 @@
-.PHONY : deploy local
-deploy:
-	@echo "Deploying to $(DEPLOY_TARGET)"
-	@hexo clean
+.PHONY : deploy local clean
+deploy: clean
+	@echo "Deploying to github pages"
 	@hexo generate
 	@hexo deploy
 
-local:
+local: clean
 	@echo "Starting local server"
-	@hexo clean
 	@hexo generate
 	@hexo server
+
+clean:
+	@hexo clean

@@ -725,11 +725,11 @@ post:
   # 评论插件
   # Comment plugin
   comments:
-    enable: false
+    enable: true
     # 指定的插件，需要同时设置对应插件的必要参数
     # The specified plugin needs to set the necessary parameters at the same time
     # Options: utterances | disqus | gitalk | valine | waline | changyan | livere | remark42 | twikoo | cusdis | giscus
-    type: disqus
+    type: gitalk 
 
 
 #---------------------------
@@ -768,11 +768,11 @@ disqus:
 # Based on GitHub Issues
 # See: https://github.com/gitalk/gitalk#options
 gitalk:
-  clientID:
-  clientSecret:
-  repo:
-  owner:
-  admin: ['name']
+  clientID: b25aa0a3d88c5fc4dbeb
+  clientSecret: 7193fb8c2e2e1def40e36c8e071a994558aaf166
+  repo: sshell.github.io
+  owner: 'sshelll'
+  admin: ['sshelll']
   language: zh-CN
   labels: ['Gitalk']
   perPage: 10
