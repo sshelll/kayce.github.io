@@ -1,4 +1,4 @@
-.PHONY : deploy local clean new
+.PHONY : deploy local clean new update_fluid
 
 local: clean
 	@echo "Starting local server"
@@ -13,6 +13,9 @@ deploy: clean
 new:
 	@echo "Creating new post $(title)"
 	@hexo new post $(title)
+
+update_fluid:
+	@npm update --save hexo-theme-fluid
 
 clean:
 	@hexo clean
