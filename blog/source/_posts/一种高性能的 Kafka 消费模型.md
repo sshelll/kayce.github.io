@@ -107,7 +107,7 @@ type KafkaConsumer[T msgtype.KafkaMessage] struct {
 	maxBatchSize   int
 	forceFlushTime time.Duration
   
-	closeCh            chan struct{}
+	closeCh chan struct{}
 }
 
 func (c *KafkaConsumer[T]) Run() {
