@@ -82,10 +82,247 @@ tags:
 
 ### 高性能的批量消费模型
 
-在 Kafka 不支持 `ACK` / `NACK` 的情况之下，是不是就无法使用并发消费了呢？当然不是。接下来将介绍一种可配置、高并发的高性能消费模型：
+在 Kafka 不支持 `ACK` / `NACK` 的情况之下，如果我们仍需要保证消费的有序性，是不是就无法使用并发消费了呢？当然不是。接下来将介绍一种可配置、高并发的高性能消费模型：
 
-#### 以 Partition 为维度的并发
+#### 以 Partition 为维度并发
 
-熟悉 Kafka 架构的同学可能知道，Kafka 同一个 Topic 下的消息是分为多个 Partition 进行存储的，每个 Partition 中的消息都是按照投递的顺序进行排序的，也就是说，我们在消费同一个 Topic 的情况下，至少可以进行 Partition 维度的并发。
+熟悉 Kafka 架构的同学可能知道，Kafka 同一个 Topic 下的消息是分为多个 Partition 进行存储的，每个 Partition 中的消息都是按照投递的顺序进行排序的，也就是说，我们在消费同一个 Topic 的情况下，至少可以进行 Partition 维度的并发——就像在 RocketMQ 中，每个 Queue 中的消息是局部有序的。
 
-// TODO
+![根据 partition 并发处理](/img/kafka-go/by_partition.png)
+
+在这种模型中，我们需要做的主要有两件事：
+
+1. 实现一个简单的 Dispatcher，根据 Kafka Message 的 Partition 进行分组后，将这条消息投入对应 Partition 的 chan 中
+2. 实现一个通用的 Worker，用于处理 Partition Chan 中的消息
+
+以下是我写的一段核心代码：
+
+``` go
+type KafkaConsumer[T msgtype.KafkaMessage] struct {
+	callback           func(msgs ...T)
+	partitionMsgs      map[int]chan T
+	partitionQueueSize int
+  
+  minBatchSize   int
+	maxBatchSize   int
+	forceFlushTime time.Duration
+  
+  closeCh            chan struct{}
+}
+
+func (c *KafkaConsumer[T]) Run() {
+	go func() {
+		log.Info("kafka consumer started")
+		for {
+			msg := c.fetchMsg()
+			// 优雅退出
+			select {
+			case <-c.closeCh:
+				log.Info("kafka consumer stopped")
+				return
+			default:
+			}
+			c.parallelHandle(msg)
+		}
+	}()
+}
+
+func (c *KafkaConsumer[T]) Stop() {
+  close(c.closeCh)
+}
+
+func (c *KafkaConsumer[T]) parallelHandle(msg T) {
+	partition := msg.RawMessage().Partition
+
+	if _, ok := c.partitionMsgs[partition]; !ok {
+		c.startPartitionHandler(partition)
+	}
+
+	c.partitionMsgs[partition] <- msg
+}
+
+func (c *KafkaConsumer[T]) startPartitionHandler(partition int) {
+	// 初始化分区消息队列
+	c.partitionMsgs[partition] = make(chan T, c.partitionQueueSize)
+
+	// 启动分区消费者
+	go func() {
+		flushTimer := time.NewTimer(c.forceFlushTime)
+
+		for {
+			msgBatch := make([]T, 0, c.maxBatchSize)
+
+			// 先取一条消息, 避免直接进入计时
+			msgBatch = append(msgBatch, <-c.partitionMsgs[partition])
+			flushTimer.Reset(c.forceFlushTime)
+
+			func() {
+				for len(msgBatch) < c.maxBatchSize {
+					select {
+          // 超时退出
+					case <-flushTimer.C:
+						return
+          // 接收到新的 msg
+					case msg := <-c.partitionMsgs[partition]:
+						msgBatch = append(msgBatch, msg)
+          // 暂时没有新的消息到来，但也尚未超时，此时缓存的消息若满足最小接收量则退出
+					default:
+						if len(msgBatch) > c.minBatchSize {
+							return
+						}
+					}
+				}
+			}()
+
+      // callback 中根据业务自行实现重试保证成功或是 drop
+      c.callback(msgBatch...)
+			c.CommitMessages(msgBatch...)
+		}
+	}()
+}
+```
+
+可以看到，在实际的代码实现中，会加入许多额外的细节来提供健壮性，其中使用了 `map[int]chan T`  结构来维护消息的分组过程，也就是实现了上述的 `Dispatcher`。除此之外，在 `startPartitionHandler(int)` 方法中，以异步的形式实现了前文中的`Worker`。
+
+在 Worker 的具体实现中，我使用了 3 个可配置的选项来根据实际情况动态的调控消费行为，分别是：
+
+1. `forceFlushTime` ，每次处理消息前最大的循环时间——防止一直接收不到足量的消息而阻塞
+2. `maxBatchSize`，每次批量处理消息的最大数量——防止一次性接收过多消息
+3. `minBatchSize`，每次批量处理消息的最小数量——某些时候上游已经暂时不再产生消息，此时为了避免持续空转到超时，可以提前返回
+
+---
+
+#### 从单条转向到批量处理消息
+
+从上面的 `KafkaConsumer` 中可以看到，我们对于消息的处理从单条转向了批量。在批量处理的过程中，我们需要保证所有消息都处理成功后（至少是业务上认为处理成功），再返回成功，常见的处理方式就是无限重试。在处理完一批消息之后，我们需要批量的提交消息，kafka-go 本身就提供了批量处理消息的函数，但是我们也需要进行一些合理的封装来实现如下功能：
+
+1. 给 kafka 对应的 partition 提交 offset
+2. 合理拆分消息数组，避免一次性提交的消息大小超过 kafka 的配置限额
+3. 对 kafka 的连接进行合理的检测
+
+伪代码如下：
+
+```go
+type KafkaPartitionProducer[T msgtype.KafkaMessage] struct {
+	brokers   []string
+	topic     string
+	partition int
+	conn      *kafka.Conn
+	codec     *kafka.CompressionCodec
+
+	logger *logrus.Entry
+}
+
+func (pp *KafkaPartitionProducer[T]) ProduceMust(msgs ...T) {
+	if pp.codec == nil {
+		panic("codec is nil")
+	}
+
+	if pp.conn == nil {
+		pp.connectMust()
+	}
+
+	// 构造 kafka 消息
+	kmsgs := make([]kafka.Message, 0, len(msgs))
+	for _, msg := range msgs {
+		kmsg := pp.buildKafkaMessage(msg)
+		if kmsg == nil {
+			continue
+		}
+		kmsgs = append(kmsgs, *kmsg)
+	}
+
+	if len(kmsgs) == 0 {
+		pp.logger.Warn("no messages to produce")
+		return
+	}
+
+	// 无限重试直到发送成功
+	for i := 0; ; i++ {
+		nbytes, _, offset, _, err := pp.conn.WriteCompressedMessagesAt(*pp.codec, kmsgs...)
+
+		if err == nil {
+			log.Infof("write compressed messages success")
+			break
+		}
+
+		switch err {
+		case kafka.MessageSizeTooLarge:
+			log.WithError(err).Errorf("kafka message size too large")
+			if len(kmsgs) <= 1 {
+				panic("kafka message size too large")
+			}
+			// 消息过多对半递归重发
+			mid := len(kmsgs) / 2
+			pp.ProduceMust(msgs[:mid]...)
+			pp.ProduceMust(msgs[mid:]...)
+		default:
+			// 其它错误直接重连
+			log.WithError(err).Errorf("failed to write compressed messages")
+			pp.connectMust()
+		}
+	}
+}
+
+func (pp *KafkaPartitionProducer[T]) connect() error {
+	if pp.conn != nil {
+		pp.conn.Close()
+		pp.conn = nil
+	}
+
+	for _, addr := range pp.brokers {
+		log := pp.logger.WithField("addr", addr)
+
+		ctx, canceler := context.WithTimeout(context.Background(), 5*time.Second)
+		defer canceler()
+
+    // 连接到指定 broker 的 topic / partition
+		conn, err := kafka.DialLeader(ctx, "tcp", addr, pp.topic, pp.partition)
+		if err != nil {
+			log.WithError(err).Errorf("failed to dial leader for partition")
+			continue
+		}
+
+		// 测试 kafka 连接是否正常
+		first, err := conn.ReadFirstOffset()
+		if err != nil {
+			log.WithError(err).Error("failed to read first offset")
+			conn.Close()
+			continue
+		}
+
+		last, err := conn.ReadLastOffset()
+		if err != nil {
+			log.WithError(err).Error("failed to read last offset")
+			conn.Close()
+			continue
+		}
+
+		log.WithFields(logrus.Fields{
+			"first": first,
+			"last":  last,
+		}).Info("dial conn success")
+
+		pp.conn = conn
+		break
+	}
+
+	// 没有可用的 broker 连接
+	if pp.conn == nil {
+		pp.logger.WithField("brokers", pp.brokers).Error("failed to dial leader from all brokers")
+		return fmt.Errorf("failed to dial leader for partition %d", pp.partition)
+	}
+
+	return nil
+}
+```
+
+## 后话
+
+Kafka 的 Consumer Gourp 离不开 Rebalance 机制，所谓 Rebalance 指的就是将一个 Topic 下若干 Partition 通过协商的过程平均分配给同一个 Consumer Group 中不同 Consumer 的过程。也就是说，一个 Partition 只能被一个 Consumer Group 中的一个消费者，也就让我们可以容易的实现局部顺序消费，配合上 Producer 端的少许逻辑，就可以达成业务上的顺序性。
+
+![consumer group 与 partition](/img/kafka-go/kafka-consumergroup.png)
+
+在上图中，以订单的流转为例，只需要 Producer 在生产消息时根据订单 id 分配固定的 Partition 有序的发送消息（如对于订单221，将发起订单、流转订单、完成订单三个操作依次发送到 P1 中），下游的 Consumer 就能保证同一个订单的消息被按序处理，因为同一个 Partition 中的消息不会同时被两个 Consumer 消费。
+
+但是有些极端的情况仍可能导致重复消费的错误，例如 C1 在消费完「发起订单」后，还没来得及 Commit 就挂掉了，Rebalance 后 C2 或 C3 又会重新接收到该消息，并尝试再次发起订单，因此业务方自行保证消息消费的幂等性是十分有必要的。
