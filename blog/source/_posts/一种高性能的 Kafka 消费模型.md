@@ -103,11 +103,11 @@ type KafkaConsumer[T msgtype.KafkaMessage] struct {
 	partitionMsgs      map[int]chan T
 	partitionQueueSize int
   
-  minBatchSize   int
+	minBatchSize   int
 	maxBatchSize   int
 	forceFlushTime time.Duration
   
-  closeCh            chan struct{}
+	closeCh            chan struct{}
 }
 
 func (c *KafkaConsumer[T]) Run() {
@@ -128,7 +128,7 @@ func (c *KafkaConsumer[T]) Run() {
 }
 
 func (c *KafkaConsumer[T]) Stop() {
-  close(c.closeCh)
+	close(c.closeCh)
 }
 
 func (c *KafkaConsumer[T]) parallelHandle(msg T) {
@@ -175,7 +175,7 @@ func (c *KafkaConsumer[T]) startPartitionHandler(partition int) {
 			}()
 
       // callback 中根据业务自行实现重试保证成功或是 drop
-      c.callback(msgBatch...)
+			c.callback(msgBatch...)
 			c.CommitMessages(msgBatch...)
 		}
 	}()
