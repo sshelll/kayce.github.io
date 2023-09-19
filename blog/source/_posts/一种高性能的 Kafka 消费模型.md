@@ -159,13 +159,13 @@ func (c *KafkaConsumer[T]) startPartitionHandler(partition int) {
 			func() {
 				for len(msgBatch) < c.maxBatchSize {
 					select {
-          // 超时退出
+					// 超时退出
 					case <-flushTimer.C:
 						return
-          // 接收到新的 msg
+					// 接收到新的 msg
 					case msg := <-c.partitionMsgs[partition]:
 						msgBatch = append(msgBatch, msg)
-          // 暂时没有新的消息到来，但也尚未超时，此时缓存的消息若满足最小接收量则退出
+					// 暂时没有新的消息到来，但也尚未超时，此时缓存的消息若满足最小接收量则退出
 					default:
 						if len(msgBatch) > c.minBatchSize {
 							return
@@ -174,7 +174,7 @@ func (c *KafkaConsumer[T]) startPartitionHandler(partition int) {
 				}
 			}()
 
-      // callback 中根据业务自行实现重试保证成功或是 drop
+			// callback 中根据业务自行实现重试保证成功或是 drop
 			c.callback(msgBatch...)
 			c.CommitMessages(msgBatch...)
 		}
@@ -276,7 +276,7 @@ func (pp *KafkaPartitionProducer[T]) connect() error {
 		ctx, canceler := context.WithTimeout(context.Background(), 5*time.Second)
 		defer canceler()
 
-    // 连接到指定 broker 的 topic / partition
+		// 连接到指定 broker 的 topic / partition
 		conn, err := kafka.DialLeader(ctx, "tcp", addr, pp.topic, pp.partition)
 		if err != nil {
 			log.WithError(err).Errorf("failed to dial leader for partition")
@@ -319,7 +319,7 @@ func (pp *KafkaPartitionProducer[T]) connect() error {
 
 ## 后话
 
-Kafka 的 Consumer Gourp 离不开 Rebalance 机制，所谓 Rebalance 指的就是将一个 Topic 下若干 Partition 通过协商的过程平均分配给同一个 Consumer Group 中不同 Consumer 的过程。也就是说，一个 Partition 只能被一个 Consumer Group 中的一个消费者，也就让我们可以容易的实现局部顺序消费，配合上 Producer 端的少许逻辑，就可以达成业务上的顺序性。
+Kafka 的 Consumer Gourp 离不开 Rebalance 机制，所谓 Rebalance 指的就是将一个 Topic 下若干 Partition 通过协商的过程平均分配给同一个 Consumer Group 中不同 Consumer 的过程。也就是说，一个 Partition 只能被一个 Consumer Group 中的一个消费者消费，也就让我们可以容易的实现局部顺序消费，配合上 Producer 端的少许逻辑，就可以达成业务上的顺序性。
 
 ![consumer group 与 partition](/img/kafka-go/kafka-consumergroup.png)
 
