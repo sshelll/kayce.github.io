@@ -170,6 +170,13 @@ func (c *KafkaConsumer[T]) startPartitionHandler(partition int) {
 						if len(msgBatch) > c.minBatchSize {
 							return
 						}
+						// 再次 select, 避免空转
+						select {
+						case <- flushTimer.C:
+							return
+						case msg := <-c.partitionMsgs[partition]:
+							msgBatch = append(msgBatch, msg)
+						}
 					}
 				}
 			}()
