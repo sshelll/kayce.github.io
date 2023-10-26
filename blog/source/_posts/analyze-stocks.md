@@ -1,7 +1,7 @@
 ---
 title: 从「股市」App 看股市
 date: 2023-10-25 22:42:26
-updated: 2023-10-25 22:42:26
+updated: 2023-10-26 15:48:26
 excerpt: 看懂股票
 categories: economics
 math: true
