@@ -412,8 +412,6 @@ func (e *mongoElect) Unlock(key string) error {
 	e.cancelTask(task)
 	return nil
 }
-
-
 ```
 
 有了加锁的底子，解锁实现起来就比较简单了，只需要调用 `cancelTask` 方法即可。
@@ -484,6 +482,14 @@ func (lt *lockedTask) key() string {
 不难看出，`lockedTask` 类型主要是封装了业务任务的执行流程，为其添加了基于 `context.Context` 的中断控制以及刷新锁的有效期的方法。
 
 
+
+---
+
+
+
+最终我们得到的选举器的工作过程大致如下图所示：
+
+![流程图](/img/simple_db_lock/p1.png)
 
 ## 结尾
 
