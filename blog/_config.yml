@@ -3,11 +3,11 @@
 ## Source: https://github.com/hexojs/hexo/
 
 # Site
-title: sshelll
+title: kayce
 subtitle: ''
 description: 'chill~'
 keywords:
-author: sshelll
+author: kayce
 language: zh-CN
 timezone: Asia/Shanghai
 
@@ -103,7 +103,7 @@ theme: fluid
 ## Docs: https://hexo.io/docs/one-command-deployment
 deploy:
   type: git
-  repo: git@github.com:sshelll/sshell.github.io
+  repo: git@github.com:sshelll/sshelll.github.io
   branch: master
 
 # 自动生成sitemap
